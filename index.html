@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام إدارة اشتراكات الصالة الرياضية</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Tajawal', sans-serif; background-color: #f8fafc; color: #334155; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-700 flex flex-col">
+
+    <!-- Password Protection Modal -->
+    <div id="auth-modal" class="fixed inset-0 bg-slate-900/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 space-y-4 text-center">
+            <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto">
+                <i data-lucide="lock" class="w-6 h-6"></i>
+            </div>
+            <h3 class="font-bold text-slate-800 text-lg">تسجيل الدخول للنظام</h3>
+            <p class="text-xs text-slate-500">الرجاء إدخال كلمة المرور للوصول إلى لوحة التحكم</p>
+            <form onsubmit="handleLogin(event)" class="space-y-3">
+                <input type="password" id="auth-password" required placeholder="كلمة المرور..." class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 text-center tracking-widest">
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-medium text-sm transition-all shadow-sm">دخول</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                    <i data-lucide="dumbbell" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg text-slate-800 leading-tight">إدارة اشتراكات الصالة الرياضية</h1>
+                    <p class="text-xs text-slate-400">لوحة التحكم السحابية</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button onclick="exportCSV()" title="تصدير جدول اكسل CSV" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-all">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i>
+                    <span class="hidden sm:inline">تصدير CSV</span>
+                </button>
+                <button onclick="exportJSON()" title="نسخة احتياطية" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-all">
+                    <i data-lucide="download" class="w-4 h-4 text-blue-600"></i>
+                    <span class="hidden sm:inline">نسخة احتياطية</span>
+                </button>
+                <label title="استيراد" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-all cursor-pointer">
+                    <i data-lucide="upload" class="w-4 h-4 text-amber-600"></i>
+                    <span class="hidden sm:inline">استيراد</span>
+                    <input type="file" id="import-file" accept=".json" onchange="importJSON(event)" class="hidden">
+                </label>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1">
+
+        <div id="toast" class="hidden fixed bottom-5 left-5 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all">
+            <i data-lucide="info" class="w-4 h-4 text-blue-400" id="toast-icon"></i>
+            <span id="toast-message">تمت العملية بنجاح</span>
+        </div>
+
+        <!-- Statistics Cards -->
+        <section class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400">إجمالي المشتركين</p>
+                    <h3 class="text-2xl font-bold text-slate-800 mt-1" id="stat-total">0</h3>
+                </div>
+                <div class="p-3 bg-slate-100 text-slate-600 rounded-xl"><i data-lucide="users" class="w-6 h-6"></i></div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400">الاشتراكات النشطة</p>
+                    <h3 class="text-2xl font-bold text-emerald-600 mt-1" id="stat-active">0</h3>
+                </div>
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><i data-lucide="user-check" class="w-6 h-6"></i></div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400">تنتهي قريباً (7 أيام)</p>
+                    <h3 class="text-2xl font-bold text-amber-600 mt-1" id="stat-expiring">0</h3>
+                </div>
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-xl"><i data-lucide="clock" class="w-6 h-6"></i></div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400">الاشتراكات المنتهية</p>
+                    <h3 class="text-2xl font-bold text-red-600 mt-1" id="stat-expired">0</h3>
+                </div>
+                <div class="p-3 bg-red-50 text-red-600 rounded-xl"><i data-lucide="user-x" class="w-6 h-6"></i></div>
+            </div>
+        </section>
+
+        <!-- Search & Actions -->
+        <section class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            <div class="relative flex-1">
+                <i data-lucide="search" class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                <input type="text" id="search-input" oninput="renderTable()" placeholder="ابحث باسم المشترك أو رقم الهاتف..." class="w-full pr-9 pl-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 focus:bg-white transition-all">
+            </div>
+
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+                <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-full sm:w-auto overflow-x-auto">
+                    <button onclick="setFilter('all')" id="btn-filter-all" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all bg-white text-slate-800 shadow-sm">الكل</button>
+                    <button onclick="setFilter('active')" id="btn-filter-active" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-800">نشط</button>
+                    <button onclick="setFilter('expiring')" id="btn-filter-expiring" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-800">قريب الانتهاء</button>
+                    <button onclick="setFilter('expired')" id="btn-filter-expired" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-800">منتهي</button>
+                </div>
+
+                <button onclick="openModal()" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-xl text-sm font-medium flex items-center justify-center gap-2 shadow-sm transition-all whitespace-nowrap">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                    <span>مشترك جديد</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Members Table -->
+        <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-right text-sm">
+                    <thead class="bg-slate-50/80 border-b border-slate-100 text-slate-500 font-medium">
+                        <tr>
+                            <th class="p-4">المشترك</th>
+                            <th class="p-4">الباقة والقيمة</th>
+                            <th class="p-4">الفترة (البداية / النهاية)</th>
+                            <th class="p-4 text-center">سجل الحضور الشهري</th>
+                            <th class="p-4">الأيام المتبقية</th>
+                            <th class="p-4">الحالة</th>
+                            <th class="p-4 text-center">الإجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100" id="members-table-body"></tbody>
+                </table>
+            </div>
+
+            <div id="empty-state" class="hidden p-12 text-center">
+                <div class="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <i data-lucide="users" class="w-8 h-8"></i>
+                </div>
+                <h4 class="font-bold text-slate-700 mb-1">لا يوجد مشتركين</h4>
+                <p class="text-xs text-slate-400 max-w-sm mx-auto">لم يتم العثور على أي بيانات، أضف مشتركاً جديداً.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-400">
+            <p>نظام إدارة اشتراكات الصالة الرياضية</p>
+        </div>
+    </footer>
+
+    <!-- Monthly Attendance Modal (نافذة الحضور الشهري الكبيرة) -->
+    <div id="attendance-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 space-y-5 animate-in fade-in duration-200">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
+                        <i data-lucide="calendar-check-2" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-slate-800 text-lg" id="attendance-modal-title">سجل الحضور والغياب</h3>
+                        <p class="text-xs text-slate-400">انقر على المربع لتغيير الحالة (□ فارغ ، ✓ حضور ، ✕ غياب)</p>
+                    </div>
+                </div>
+                <button onclick="closeAttendanceModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- 12 Big Clear Boxes Grid -->
+            <div class="grid grid-cols-3 sm:grid-cols-4 gap-3 py-2" id="attendance-grid">
+                <!-- JS Will Render 12 Large Clear Boxes Here -->
+            </div>
+
+            <div class="pt-3 border-t border-slate-100 flex justify-end">
+                <button onclick="closeAttendanceModal()" class="px-6 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm">
+                    إغلاق وحفظ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div id="member-modal" class="fixed inset-0 bg-slate-900/30 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-100 space-y-5">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="font-bold text-slate-800 text-lg" id="modal-title">إضافة مشترك جديد</h3>
+                <button onclick="closeModal()" class="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <form id="member-form" onsubmit="handleFormSubmit(event)" class="space-y-4">
+                <input type="hidden" id="member-id">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-medium text-slate-600 mb-1">اسم المشترك بالكامل <span class="text-red-500">*</span></label>
+                        <input type="text" id="input-name" required placeholder="مثال: أحمد عبد الله" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">رقم الهاتف (اختياري)</label>
+                        <input type="tel" id="input-phone" placeholder="مثال: 0912345678" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">قيمة الاشتراك ($ أو د.ل) <span class="text-red-500">*</span></label>
+                        <input type="number" id="input-price" min="0" step="any" required placeholder="50" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div class="sm:col-span-2 grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/60">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">مدة الاشتراك (رقم) <span class="text-red-500">*</span></label>
+                            <input type="number" id="input-duration-num" min="1" value="1" required oninput="recalculateEndDate()" class="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600 mb-1">الوحدة الزمنية <span class="text-red-500">*</span></label>
+                            <select id="input-duration-unit" onchange="recalculateEndDate()" class="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                                <option value="days">يوم</option>
+                                <option value="weeks">أسبوع</option>
+                                <option value="months" selected>شهر</option>
+                                <option value="years">سنة</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">تاريخ البداية <span class="text-red-500">*</span></label>
+                        <input type="date" id="input-start-date" onchange="recalculateEndDate()" required class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">تاريخ النهاية <span class="text-red-500">*</span></label>
+                        <input type="date" id="input-end-date" required class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div class="pt-3 border-t border-slate-100 flex gap-2">
+                    <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-medium text-sm transition-all shadow-sm">حفظ البيانات</button>
+                    <button type="button" onclick="closeModal()" class="px-5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-medium text-sm transition-all">إلغاء</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Renew Modal -->
+    <div id="renew-modal" class="fixed inset-0 bg-slate-900/30 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-100 space-y-4">
+            <div class="flex items-center gap-3 text-emerald-600">
+                <div class="p-2.5 bg-emerald-50 rounded-xl"><i data-lucide="refresh-cw" class="w-6 h-6"></i></div>
+                <h3 class="font-bold text-slate-800 text-base">تجديد الاشتراك</h3>
+            </div>
+            <p class="text-sm text-slate-600" id="renew-modal-text">هل تريد تجديد الاشتراك لهذا المشترك؟</p>
+            <div class="flex gap-2 pt-2">
+                <button id="confirm-renew-btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl text-sm font-medium transition-all">تأكيد التجديد</button>
+                <button onclick="closeRenewModal()" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-medium transition-all">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Modal -->
+    <div id="delete-modal" class="fixed inset-0 bg-slate-900/30 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-100 space-y-4">
+            <div class="flex items-center gap-3 text-red-600">
+                <div class="p-2.5 bg-red-50 rounded-xl"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div>
+                <h3 class="font-bold text-slate-800 text-base">تأكيد الحذف</h3>
+            </div>
+            <p class="text-sm text-slate-600">هل أنت متأكد من حذف هذا المشترك؟</p>
+            <div class="flex gap-2 pt-2">
+                <button id="confirm-delete-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl text-sm font-medium transition-all">حذف نهائي</button>
+                <button onclick="closeDeleteModal()" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-medium transition-all">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let members = [];
+        let currentFilter = 'all';
+        let memberToDeleteId = null;
+        let memberToRenewId = null;
+        let activeAttendanceMemberId = null;
+
+        const monthNames = ['يناير (1)', 'فبراير (2)', 'مارس (3)', 'أبريل (4)', 'مايو (5)', 'يونيو (6)', 'يوليو (7)', 'أغسطس (8)', 'سبتمبر (9)', 'أكتوبر (10)', 'نوفمبر (11)', 'ديسمبر (12)'];
+
+        window.onload = async function() {
+            if (sessionStorage.getItem('gym_auth') !== 'true') {
+                document.getElementById('auth-modal').classList.remove('hidden');
+                document.getElementById('auth-modal').classList.add('flex');
+            } else {
+                document.getElementById('auth-modal').classList.add('hidden');
+            }
+            await loadMembers();
+            renderTable();
+            lucide.createIcons();
+        };
+
+        function handleLogin(e) {
+            e.preventDefault();
+            const pass = document.getElementById('auth-password').value;
+            if (pass === 'Taha_mt07') {
+                sessionStorage.setItem('gym_auth', 'true');
+                document.getElementById('auth-modal').classList.add('hidden');
+                document.getElementById('auth-modal').classList.remove('flex');
+                showToast("تم تسجيل الدخول بنجاح");
+            } else {
+                showToast("كلمة المرور غير صحيحة!", "error");
+            }
+        }
+
+        function formatDate(d) {
+            const date = new Date(d);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function calculateRemainingDays(endDateStr) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const end = new Date(endDateStr);
+            end.setHours(0, 0, 0, 0);
+            return Math.ceil((end - today) / (1000 * 60 * 60 * 24));
+        }
+
+        function getMemberStatus(endDateStr) {
+            const days = calculateRemainingDays(endDateStr);
+            if (days < 0) return 'expired';
+            if (days <= 7) return 'expiring';
+            return 'active';
+        }
+
+        async function loadMembers() {
+            try {
+                const response = await fetch('/api/members');
+                if (response.ok) {
+                    const data = await response.json();
+                    members = data.map(m => ({
+                        ...m,
+                        months: parseMonthsData(m.months)
+                    }));
+                } else {
+                    throw new Error("Failed to fetch from cloud");
+                }
+            } catch (e) {
+                console.warn("جلب البيانات محلياً...", e);
+                const localData = localStorage.getItem('gym_members_db_v4');
+                members = localData ? JSON.parse(localData) : [];
+            }
+        }
+
+        function parseMonthsData(val) {
+            if (!val) return Array(12).fill('');
+            if (Array.isArray(val)) return val;
+            try {
+                const parsed = JSON.parse(val);
+                if (Array.isArray(parsed)) return parsed;
+            } catch (err) {}
+            return Array(12).fill('');
+        }
+
+        async function saveMemberToServer(memberData) {
+            saveToLocalStorage();
+            try {
+                const payload = {
+                    ...memberData,
+                    months: JSON.stringify(memberData.months)
+                };
+                const response = await fetch('/api/members', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error("Cloud save failed");
+            } catch (e) {
+                showToast("حدث خطأ أثناء الحفظ السحابي", "error");
+            }
+        }
+
+        async function deleteMemberFromServer(id) {
+            try {
+                await fetch(`/api/members?id=${id}`, { method: 'DELETE' });
+            } catch (e) {}
+        }
+
+        function saveToLocalStorage() {
+            try {
+                localStorage.setItem('gym_members_db_v4', JSON.stringify(members));
+            } catch (e) {}
+        }
+
+        /* فتح تبويب مربعات الشهور الـ 12 العريضة والواضحة */
+        function openAttendanceModal(id) {
+            const member = members.find(m => m.id === id);
+            if (!member) return;
+
+            activeAttendanceMemberId = id;
+            document.getElementById('attendance-modal-title').innerText = `سجل حضور: ${member.name}`;
+            renderAttendanceGrid(member);
+
+            document.getElementById('attendance-modal').classList.remove('hidden');
+            document.getElementById('attendance-modal').classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeAttendanceModal() {
+            document.getElementById('attendance-modal').classList.add('hidden');
+            document.getElementById('attendance-modal').classList.remove('flex');
+            activeAttendanceMemberId = null;
+        }
+
+        function renderAttendanceGrid(member) {
+            const grid = document.getElementById('attendance-grid');
+            grid.innerHTML = '';
+
+            const mArr = parseMonthsData(member.months);
+
+            for (let i = 0; i < 12; i++) {
+                const val = mArr[i] || '';
+                let bgClass = 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100';
+                let iconSymbol = '□';
+
+                if (val === '✓') {
+                    bgClass = 'bg-emerald-50 border-emerald-400 text-emerald-600 font-bold shadow-xs';
+                    iconSymbol = '✓';
+                } else if (val === '✕') {
+                    bgClass = 'bg-red-50 border-red-400 text-red-600 font-bold shadow-xs';
+                    iconSymbol = '✕';
+                }
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `p-3 rounded-xl border ${bgClass} transition-all flex flex-col items-center justify-between gap-2 h-24 hover:scale-102`;
+                btn.onclick = () => toggleMonthStatusInModal(i);
+
+                btn.innerHTML = `
+                    <span class="text-xs font-medium text-slate-600">${monthNames[i]}</span>
+                    <span class="text-2xl font-bold">${iconSymbol}</span>
+                `;
+                grid.appendChild(btn);
+            }
+        }
+
+        async function toggleMonthStatusInModal(monthIndex) {
+            if (!activeAttendanceMemberId) return;
+            const member = members.find(m => m.id === activeAttendanceMemberId);
+            if (!member) return;
+
+            if (!Array.isArray(member.months)) member.months = Array(12).fill('');
+
+            const current = member.months[monthIndex];
+            if (current === '') member.months[monthIndex] = '✓';
+            else if (current === '✓') member.months[monthIndex] = '✕';
+            else member.months[monthIndex] = '';
+
+            renderAttendanceGrid(member);
+            await saveMemberToServer(member);
+            renderTable();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('members-table-body');
+            const emptyState = document.getElementById('empty-state');
+            const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
+
+            let statTotal = members.length;
+            let statActive = 0, statExpiring = 0, statExpired = 0;
+
+            const processedMembers = members.map(m => {
+                const status = getMemberStatus(m.endDate);
+                const remaining = calculateRemainingDays(m.endDate);
+                if (status === 'active') statActive++;
+                else if (status === 'expiring') statExpiring++;
+                else if (status === 'expired') statExpired++;
+                return { ...m, status, remaining };
+            });
+
+            document.getElementById('stat-total').innerText = statTotal;
+            document.getElementById('stat-active').innerText = statActive;
+            document.getElementById('stat-expiring').innerText = statExpiring;
+            document.getElementById('stat-expired').innerText = statExpired;
+
+            let filtered = processedMembers.filter(m => {
+                const phoneMatch = m.phone ? m.phone.toLowerCase().includes(searchValue) : false;
+                const matchesSearch = m.name.toLowerCase().includes(searchValue) || phoneMatch;
+                const matchesFilter = (currentFilter === 'all') || (m.status === currentFilter);
+                return matchesSearch && matchesFilter;
+            });
+
+            filtered.sort((a, b) => a.remaining - b.remaining);
+            tbody.innerHTML = '';
+
+            if (filtered.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            filtered.forEach(m => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50/70 transition-all border-b border-slate-100";
+
+                const mArr = parseMonthsData(m.months);
+                const attendedCount = mArr.filter(x => x === '✓').length;
+
+                tr.innerHTML = `
+                    <td class="p-4">
+                        <div class="font-bold text-slate-800">${escapeHtml(m.name)}</div>
+                        <div class="text-xs text-slate-400 font-mono mt-0.5">${m.phone && m.phone !== 'بدون رقم هاتف' ? escapeHtml(m.phone) : 'بدون رقم هاتف'}</div>
+                    </td>
+                    <td class="p-4">
+                        <div class="text-slate-700 font-medium">${escapeHtml(m.plan)}</div>
+                        <div class="text-xs text-slate-400 font-mono">${m.price ? '$' + m.price : 'مجاني'}</div>
+                    </td>
+                    <td class="p-4 text-xs font-mono text-slate-600">
+                        <div>من: ${m.startDate}</div>
+                        <div>إلى: ${m.endDate}</div>
+                    </td>
+                    <td class="p-4 text-center">
+                        <button onclick="openAttendanceModal('${m.id}')" title="فتح سجل الحضور الشهري" class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl border border-blue-200/80 transition-all font-medium text-xs">
+                            <i data-lucide="calendar-check" class="w-4 h-4 text-blue-600"></i>
+                            <span>سجل الحضور (${attendedCount}/12)</span>
+                        </button>
+                    </td>
+                    <td class="p-4">${renderRemainingBadge(m.remaining)}</td>
+                    <td class="p-4">${renderStatusBadge(m.status)}</td>
+                    <td class="p-4 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                            <button onclick="openRenewModal('${m.id}')" title="تجديد" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                            <button onclick="openEditModal('${m.id}')" title="تعديل" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                            <button onclick="openDeleteModal('${m.id}')" title="حذف" class="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            lucide.createIcons();
+        }
+
+        function renderRemainingBadge(days) {
+            if (days < 0) return `<span class="text-xs font-medium text-red-600 bg-red-50 px-2.5 py-1 rounded-full">منتهي منذ ${Math.abs(days)} يوم</span>`;
+            if (days === 0) return `<span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">ينتهي اليوم</span>`;
+            if (days <= 7) return `<span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">متبقي ${days} أيام</span>`;
+            return `<span class="text-xs font-medium text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">متبقي ${days} يوم</span>`;
+        }
+
+        function renderStatusBadge(status) {
+            if (status === 'active') return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-200"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>نشط</span>`;
+            if (status === 'expiring') return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>قريب الانتهاء</span>`;
+            return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>منتهي</span>`;
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            ['all', 'active', 'expiring', 'expired'].forEach(f => {
+                const btn = document.getElementById(`btn-filter-${f}`);
+                btn.className = f === filter ? "px-3 py-1.5 rounded-lg text-xs font-medium transition-all bg-white text-slate-800 shadow-sm" : "px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-slate-500 hover:text-slate-800";
+            });
+            renderTable();
+        }
+
+        function openModal() {
+            document.getElementById('modal-title').innerText = "إضافة مشترك جديد";
+            document.getElementById('member-form').reset();
+            document.getElementById('member-id').value = '';
+            document.getElementById('input-start-date').value = formatDate(new Date());
+            document.getElementById('input-duration-num').value = 1;
+            document.getElementById('input-duration-unit').value = 'months';
+            recalculateEndDate();
+            document.getElementById('member-modal').classList.remove('hidden');
+            document.getElementById('member-modal').classList.add('flex');
+        }
+
+        function openEditModal(id) {
+            const member = members.find(m => m.id === id);
+            if (!member) return;
+            document.getElementById('modal-title').innerText = "تعديل بيانات المشترك";
+            document.getElementById('member-id').value = member.id;
+            document.getElementById('input-name').value = member.name;
+            document.getElementById('input-phone').value = (member.phone === 'بدون رقم هاتف' || !member.phone) ? '' : member.phone;
+            document.getElementById('input-price').value = member.price || 0;
+            document.getElementById('input-duration-num').value = member.durationNum || 1;
+            document.getElementById('input-duration-unit').value = member.durationUnit || 'months';
+            document.getElementById('input-start-date').value = member.startDate;
+            document.getElementById('input-end-date').value = member.endDate;
+            document.getElementById('member-modal').classList.remove('hidden');
+            document.getElementById('member-modal').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('member-modal').classList.add('hidden');
+            document.getElementById('member-modal').classList.remove('flex');
+        }
+
+        function recalculateEndDate() {
+            const num = parseInt(document.getElementById('input-duration-num').value) || 1;
+            const unit = document.getElementById('input-duration-unit').value;
+            const startDate = new Date(document.getElementById('input-start-date').value || formatDate(new Date()));
+            let endDate = new Date(startDate);
+
+            if (unit === 'days') endDate.setDate(endDate.getDate() + num);
+            else if (unit === 'weeks') endDate.setDate(endDate.getDate() + (num * 7));
+            else if (unit === 'months') endDate.setMonth(endDate.getMonth() + num);
+            else if (unit === 'years') endDate.setFullYear(endDate.getFullYear() + num);
+
+            document.getElementById('input-end-date').value = formatDate(endDate);
+        }
+
+        function getUnitNameAr(unit, num) {
+            if (unit === 'days') return num == 1 ? 'يوم واحد' : `${num} أيام`;
+            if (unit === 'weeks') return num == 1 ? 'أسبوع واحد' : `${num} أسابيع`;
+            if (unit === 'months') return num == 1 ? 'شهر واحد' : `${num} أشهر`;
+            if (unit === 'years') return num == 1 ? 'سنة واحدة' : `${num} سنوات`;
+            return `${num}`;
+        }
+
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            const id = document.getElementById('member-id').value;
+            const name = document.getElementById('input-name').value.trim();
+            const phoneInput = document.getElementById('input-phone').value.trim();
+            const phone = phoneInput === '' ? 'بدون رقم هاتف' : phoneInput;
+            const durationNum = parseInt(document.getElementById('input-duration-num').value) || 1;
+            const durationUnit = document.getElementById('input-duration-unit').value;
+            const plan = getUnitNameAr(durationUnit, durationNum);
+            const price = parseFloat(document.getElementById('input-price').value) || 0;
+            const startDate = document.getElementById('input-start-date').value;
+            const endDate = document.getElementById('input-end-date').value;
+
+            if (new Date(endDate) < new Date(startDate)) {
+                showToast("تاريخ النهاية يجب أن يكون بعد تاريخ البداية!", "error");
+                return;
+            }
+
+            let existingMonths = Array(12).fill('');
+            if (id) {
+                const old = members.find(m => m.id === id);
+                if (old && Array.isArray(old.months)) existingMonths = old.months;
+            }
+
+            const memberData = { id: id || Date.now().toString(), name, phone, durationNum, durationUnit, plan, price, startDate, endDate, months: existingMonths };
+
+            if (id) {
+                const index = members.findIndex(m => m.id === id);
+                if (index !== -1) { members[index] = memberData; showToast("تم التحديث بنجاح"); }
+            } else {
+                members.push(memberData);
+                showToast("تمت الإضافة بنجاح");
+            }
+
+            await saveMemberToServer(memberData);
+            renderTable();
+            closeModal();
+        }
+
+        function openRenewModal(id) {
+            const m = members.find(item => item.id === id);
+            if (!m) return;
+            memberToRenewId = id;
+            document.getElementById('renew-modal-text').innerText = `هل تريد تجديد اشتراك (${m.name}) لمدة (${m.plan}) إضافية؟`;
+            document.getElementById('confirm-renew-btn').onclick = confirmRenew;
+            document.getElementById('renew-modal').classList.remove('hidden');
+            document.getElementById('renew-modal').classList.add('flex');
+        }
+
+        function closeRenewModal() {
+            document.getElementById('renew-modal').classList.add('hidden');
+            document.getElementById('renew-modal').classList.remove('flex');
+            memberToRenewId = null;
+        }
+
+        async function confirmRenew() {
+            if (!memberToRenewId) return;
+            const index = members.findIndex(m => m.id === memberToRenewId);
+            if (index !== -1) {
+                const current = members[index];
+                const baseDate = new Date(current.endDate) < new Date() ? new Date() : new Date(current.endDate);
+                const num = current.durationNum || 1;
+                const unit = current.durationUnit || 'months';
+                let newEnd = new Date(baseDate);
+
+                if (unit === 'days') newEnd.setDate(newEnd.getDate() + num);
+                else if (unit === 'weeks') newEnd.setDate(newEnd.getDate() + (num * 7));
+                else if (unit === 'months') newEnd.setMonth(newEnd.getMonth() + num);
+                else if (unit === 'years') newEnd.setFullYear(newEnd.getFullYear() + num);
+
+                members[index].startDate = formatDate(baseDate);
+                members[index].endDate = formatDate(newEnd);
+
+                await saveMemberToServer(members[index]);
+                renderTable();
+                showToast("تم التجديد بنجاح");
+            }
+            closeRenewModal();
+        }
+
+        function openDeleteModal(id) {
+            memberToDeleteId = id;
+            document.getElementById('confirm-delete-btn').onclick = confirmDelete;
+            document.getElementById('delete-modal').classList.remove('hidden');
+            document.getElementById('delete-modal').classList.add('flex');
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('delete-modal').classList.add('hidden');
+            document.getElementById('delete-modal').classList.remove('flex');
+            memberToDeleteId = null;
+        }
+
+        async function confirmDelete() {
+            if (!memberToDeleteId) return;
+            await deleteMemberFromServer(memberToDeleteId);
+            members = members.filter(m => m.id !== memberToDeleteId);
+            saveToLocalStorage();
+            renderTable();
+            showToast("تم الحذف بنجاح");
+            closeDeleteModal();
+        }
+
+        function exportJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(members, null, 2));
+            const dl = document.createElement('a');
+            dl.setAttribute("href", dataStr);
+            dl.setAttribute("download", `gym_backup_${formatDate(new Date())}.json`);
+            dl.click();
+            dl.remove();
+        }
+
+        async function importJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    members = JSON.parse(e.target.result);
+                    saveToLocalStorage();
+                    for (const m of members) await saveMemberToServer(m);
+                    renderTable();
+                    showToast("تم الاستيراد والمزامنة بنجاح");
+                } catch (err) {
+                    showToast("خطأ في قراءة الملف!", "error");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function exportCSV() {
+            if (members.length === 0) return showToast("لا توجد بيانات!", "error");
+            let csv = "\uFEFFالاسم,الهاتف,الباقة,السعر,تاريخ البداية,تاريخ النهاية,الحالة\n";
+            members.forEach(m => {
+                const status = getMemberStatus(m.endDate);
+                const stText = status === 'active' ? 'نشط' : (status === 'expiring' ? 'قريب' : 'منتهي');
+                csv += `"${m.name}","${m.phone === 'بدون رقم هاتف' ? '' : m.phone}","${m.plan}","${m.price || 0}","${m.startDate}","${m.endDate}","${stText}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const dl = document.createElement('a');
+            dl.setAttribute('href', url);
+            dl.setAttribute('download', `members_${formatDate(new Date())}.csv`);
+            dl.click();
+            dl.remove();
+        }
+
+        function showToast(msg, type = "success") {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-message').innerText = msg;
+            toast.className = `fixed bottom-5 left-5 z-50 text-white px-4 py-3 rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all ${type === 'error' ? 'bg-red-800' : 'bg-slate-800'}`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
