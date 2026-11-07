@@ -1,138 +1,134 @@
+// Cloudflare Pages Function: /api/members
+// Uses the existing D1 binding named DB and the existing members table as-is.
+
+function normalizeMonths(value) {
+    let parsed = value;
+
+    if (typeof parsed === "string") {
+        try {
+            parsed = JSON.parse(parsed);
+        } catch {
+            parsed = [];
+        }
+    }
+
+    if (!Array.isArray(parsed)) parsed = [];
+
+    return JSON.stringify(
+        Array.from({ length: 12 }, (_, index) => parsed[index] ?? "")
+    );
+}
+
+function jsonError(message, status = 500) {
+    return Response.json({ success: false, error: message }, { status });
+}
 
 export async function onRequest(context) {
     const { request, env } = context;
     const url = new URL(request.url);
-    const method = request.method;
+    const method = request.method.toUpperCase();
 
-    // تجهيز بيانات المربعات الـ12 للحفظ
-    function normalizeMonths(value) {
-        const emptyMonths = Array(12).fill(null);
-
-        if (Array.isArray(value)) {
-            return JSON.stringify(
-                Array.from({ length: 12 }, (_, i) => value[i] ?? null)
-            );
-        }
-
-        if (typeof value === "string") {
-            try {
-                const parsed = JSON.parse(value);
-
-                if (Array.isArray(parsed)) {
-                    return JSON.stringify(
-                        Array.from({ length: 12 }, (_, i) => parsed[i] ?? null)
-                    );
-                }
-            } catch (error) {
-                // إذا كانت البيانات غير صالحة نستخدم مصفوفة فارغة
-            }
-        }
-
-        return JSON.stringify(emptyMonths);
+    if (!env.DB) {
+        return jsonError("لم يتم العثور على ربط قاعدة البيانات DB في إعدادات Cloudflare.", 500);
     }
 
-    // 1. جلب جميع المشتركين
+    // Read members from the existing D1 table.
     if (method === "GET") {
-        const { results } = await env.DB
-            .prepare("SELECT * FROM members")
-            .all();
+        try {
+            const { results = [] } = await env.DB
+                .prepare(`
+                    SELECT id, name, phone, durationNum, durationUnit,
+                           plan, price, startDate, endDate, months
+                    FROM members
+                `)
+                .all();
 
-        return Response.json(results);
+            return Response.json(results);
+        } catch (error) {
+            return jsonError(error?.message || "تعذر جلب بيانات المشتركين.");
+        }
     }
 
-    // 2. إضافة أو تحديث مشترك
+    // Insert or update one member. ON CONFLICT makes retries safe (no duplicates).
     if (method === "POST") {
         try {
             const data = await request.json();
 
-            const months = normalizeMonths(data.months);
+            if (!data || data.id === undefined || data.id === null || String(data.id).trim() === "") {
+                return jsonError("معرّف المشترك مطلوب.", 400);
+            }
+            if (!data.name || String(data.name).trim() === "") {
+                return jsonError("اسم المشترك مطلوب.", 400);
+            }
 
-            // إذا لم يوجد تاريخ أساسي، نستخدم تاريخ نهاية الاشتراك
-            const attendanceBaseEndDate =
-                data.attendanceBaseEndDate || data.endDate;
+            const id = String(data.id);
+            const durationNum = Number.parseInt(data.durationNum, 10) || 1;
+            const durationUnit = String(data.durationUnit || "months");
+            const price = Number(data.price) || 0;
+            const months = normalizeMonths(data.months);
 
             await env.DB.prepare(`
                 INSERT INTO members (
-                    id,
-                    name,
-                    phone,
-                    plan,
-                    price,
-                    startDate,
-                    endDate,
-                    notes,
-                    months,
-                    attendanceBaseEndDate
+                    id, name, phone, durationNum, durationUnit,
+                    plan, price, startDate, endDate, months
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     phone = excluded.phone,
+                    durationNum = excluded.durationNum,
+                    durationUnit = excluded.durationUnit,
                     plan = excluded.plan,
                     price = excluded.price,
                     startDate = excluded.startDate,
                     endDate = excluded.endDate,
-                    notes = excluded.notes,
-                    months = excluded.months,
-                    attendanceBaseEndDate = excluded.attendanceBaseEndDate
+                    months = excluded.months
             `).bind(
-                data.id,
-                data.name,
-                data.phone,
-                data.plan,
-                data.price,
-                data.startDate,
-                data.endDate,
-                data.notes || "",
-                months,
-                attendanceBaseEndDate
+                id,
+                String(data.name).trim(),
+                data.phone == null ? "" : String(data.phone),
+                durationNum,
+                durationUnit,
+                data.plan == null ? "" : String(data.plan),
+                price,
+                data.startDate == null ? "" : String(data.startDate),
+                data.endDate == null ? "" : String(data.endDate),
+                months
             ).run();
 
             return Response.json({
                 success: true,
+                id,
                 message: "تم حفظ بيانات المشترك بنجاح"
             });
-
         } catch (error) {
-            return Response.json({
-                success: false,
-                error: error.message
-            }, { status: 500 });
+            return jsonError(error?.message || "تعذر حفظ بيانات المشترك.");
         }
     }
 
-    // 3. حذف مشترك
+    // Delete is idempotent, so retrying a queued deletion is safe.
     if (method === "DELETE") {
         try {
             const id = url.searchParams.get("id");
-
-            if (!id) {
-                return Response.json({
-                    success: false,
-                    error: "معرّف المشترك مطلوب"
-                }, { status: 400 });
-            }
+            if (!id) return jsonError("معرّف المشترك مطلوب.", 400);
 
             await env.DB
                 .prepare("DELETE FROM members WHERE id = ?")
-                .bind(id)
+                .bind(String(id))
                 .run();
 
             return Response.json({
                 success: true,
+                id,
                 message: "تم حذف المشترك بنجاح"
             });
-
         } catch (error) {
-            return Response.json({
-                success: false,
-                error: error.message
-            }, { status: 500 });
+            return jsonError(error?.message || "تعذر حذف المشترك.");
         }
     }
 
     return new Response("Method not allowed", {
-        status: 405
+        status: 405,
+        headers: { Allow: "GET, POST, DELETE" }
     });
 }
