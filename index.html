@@ -7,7 +7,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- الخطوة 4: ربط ملف manifest.json -->
     <link rel="manifest" href="/manifest.json">
     <style>
         body {
@@ -83,12 +82,6 @@
 
     <!-- Main -->
     <main class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1">
-
-        <!-- Toast -->
-        <div id="toast" class="hidden fixed bottom-5 left-5 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm items-center gap-2 transition-all">
-            <i data-lucide="info" class="w-4 h-4 text-blue-400" id="toast-icon"></i>
-            <span id="toast-message">تمت العملية بنجاح</span>
-        </div>
 
         <!-- Statistics -->
         <section class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -405,12 +398,32 @@
 
             document.getElementById('auth-modal').classList.add('hidden');
             document.getElementById('auth-modal').classList.remove('flex');
-
-            showToast('تم تسجيل الدخول بنجاح');
         } else {
-            showToast('كلمة المرور غير صحيحة!', 'error');
+            alert('كلمة المرور غير صحيحة!');
         }
     }
+
+    // =========================
+    // AUTO-SYNC WHEN ONLINE
+    // =========================
+    window.addEventListener('online', async () => {
+        try {
+            for (const member of members) {
+                const payload = {
+                    ...member,
+                    months: JSON.stringify(member.months)
+                };
+                
+                await fetch('/api/members', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
+        } catch (e) {
+            console.error('فشل المزامنة التلقائية:', e);
+        }
+    });
 
     // =========================
     // DATE FUNCTIONS
@@ -577,8 +590,7 @@
             return true;
 
         } catch (e) {
-            console.error(e);
-            showToast('تم الحفظ محلياً، لكن تعذرت المزامنة السحابية', 'error');
+            console.error('تم الحفظ محلياً فقط لعدم وجود إنترنت', e);
             return false;
         }
     }
@@ -597,8 +609,7 @@
             return true;
 
         } catch (e) {
-            console.error(e);
-            showToast('تعذر حذف البيانات من الخادم', 'error');
+            console.warn('تم الحذف محلياً فقط لعدم وجود إنترنت', e);
             return false;
         }
     }
@@ -734,11 +745,6 @@
             renderTable();
 
             await saveMemberToServer(member);
-
-            showToast(
-                '🎉 اكتمل الحضور 12/12! تم تجديد الاشتراك لمدة سنة كاملة وتصفير سجل الحضور.'
-            );
-
             return;
         }
 
@@ -746,20 +752,6 @@
         renderTable();
 
         await saveMemberToServer(member);
-
-        if (oldStatus === '') {
-            showToast(
-                `تم تسجيل الحضور ✓ وإضافة شهر. الحضور: ${attendanceCount}/12`
-            );
-        } else if (oldStatus === '✓') {
-            showToast(
-                `تم تعديل الحضور إلى غياب ✕. الحضور: ${attendanceCount}/12`
-            );
-        } else {
-            showToast(
-                `تم إزالة علامة الغياب. الحضور: ${attendanceCount}/12`
-            );
-        }
     }
 
     // =========================
@@ -1110,10 +1102,7 @@
             document.getElementById('input-end-date').value;
 
         if (endDate < startDate) {
-            showToast(
-                'تاريخ النهاية يجب أن يكون بعد تاريخ البداية!',
-                'error'
-            );
+            alert('تاريخ النهاية يجب أن يكون بعد تاريخ البداية!');
             return;
         }
 
@@ -1153,11 +1142,9 @@
 
             if (index !== -1) {
                 members[index] = memberData;
-                showToast('تم التحديث بنجاح');
             }
         } else {
             members.push(memberData);
-            showToast('تمت الإضافة بنجاح');
         }
 
         await saveMemberToServer(memberData);
@@ -1241,8 +1228,6 @@
             await saveMemberToServer(members[index]);
 
             renderTable();
-
-            showToast('تم التجديد بنجاح وتصفير سجل الحضور');
         }
 
         closeRenewModal();
@@ -1274,19 +1259,12 @@
 
         const id = memberToDeleteId;
 
-        const success = await deleteMemberFromServer(id);
-
-        if (!success) {
-            closeDeleteModal();
-            return;
-        }
+        await deleteMemberFromServer(id);
 
         members = members.filter(m => m.id !== id);
 
         saveToLocalStorage();
         renderTable();
-
-        showToast('تم الحذف بنجاح');
 
         closeDeleteModal();
     }
@@ -1350,11 +1328,9 @@
 
                 renderTable();
 
-                showToast('تم الاستيراد بنجاح');
-
             } catch (err) {
                 console.error(err);
-                showToast('خطأ في قراءة ملف النسخة الاحتياطية!', 'error');
+                alert('خطأ في قراءة ملف النسخة الاحتياطية!');
             }
 
             event.target.value = '';
@@ -1365,7 +1341,8 @@
 
     function exportCSV() {
         if (members.length === 0) {
-            return showToast('لا توجد بيانات!', 'error');
+            alert('لا توجد بيانات!');
+            return;
         }
 
         let csv =
@@ -1444,37 +1421,9 @@
             .replace(/\r/g, '\\r');
     }
 
-    function showToast(msg, type = 'success') {
-        const toast = document.getElementById('toast');
-
-        document.getElementById('toast-message').innerText = msg;
-
-        toast.className =
-            `fixed bottom-5 left-5 z-50 text-white px-4 py-3 rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all ${
-                type === 'error' ? 'bg-red-800' : 'bg-slate-800'
-            }`;
-
-        toast.classList.remove('hidden');
-
-        const icon = document.getElementById('toast-icon');
-
-        if (icon) {
-            icon.setAttribute(
-                'data-lucide',
-                type === 'error' ? 'alert-circle' : 'info'
-            );
-
-            lucide.createIcons();
-        }
-
-        setTimeout(() => {
-            toast.classList.add('hidden');
-        }, 3500);
-    }
-
 </script>
 
-<!-- الخطوة 2: تفعيل وتسجيل الـ Service Worker -->
+<!-- Service Worker Registration -->
 <script>
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
@@ -1483,42 +1432,6 @@
                 .catch(err => console.log('Service Worker registration failed:', err));
         });
     }
-</script>
-
-</body>
-</html>
-'\\n')
-            .replace(/\r/g, '\\r');
-    }
-
-    function showToast(msg, type = 'success') {
-        const toast = document.getElementById('toast');
-
-        document.getElementById('toast-message').innerText = msg;
-
-        toast.className =
-            `fixed bottom-5 left-5 z-50 text-white px-4 py-3 rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all ${
-                type === 'error' ? 'bg-red-800' : 'bg-slate-800'
-            }`;
-
-        toast.classList.remove('hidden');
-
-        const icon = document.getElementById('toast-icon');
-
-        if (icon) {
-            icon.setAttribute(
-                'data-lucide',
-                type === 'error' ? 'alert-circle' : 'info'
-            );
-
-            lucide.createIcons();
-        }
-
-        setTimeout(() => {
-            toast.classList.add('hidden');
-        }, 3500);
-    }
-
 </script>
 
 </body>
