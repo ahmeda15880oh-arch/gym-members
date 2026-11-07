@@ -1,0 +1,15 @@
+{
+  "name": "إدارة اشتراكات الصالة الرياضية",
+  "short_name": "شْعُبَّة جيم",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=192&h=192&fit=crop",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    }
+  ]
+}
