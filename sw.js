@@ -1,53 +1,76 @@
-const CACHE_NAME = 'shouba-gym-cache-v1';
-const ASSETS_TO_CACHE = [
-    '/',
-    '/index.html',
-    'https://cdn.tailwindcss.com',
-    'https://unpkg.com/lucide@latest',
-    'https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap'
+const CACHE_NAME = 'gym-management-v3';
+const APP_SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  'https://cdn.tailwindcss.com',
+  'https://unpkg.com/lucide@latest',
+  'https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap'
 ];
 
-// تثبيت التخزين المؤقت للملفات الأساسية
-self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => {
-            return cache.addAll(ASSETS_TO_CACHE);
-        })
-    );
-    self.skipWaiting();
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(async cache => {
+        // Cache each asset independently so one CDN failure does not block installation.
+        await Promise.allSettled(APP_SHELL.map(url => cache.add(url)));
+      })
+      .then(() => self.skipWaiting())
+  );
 });
 
-// تفعيل الخدمة وتنظيف الكاش القديم عند التحديث
-self.addEventListener('activate', (event) => {
-    event.waitUntil(
-        caches.keys().then((keys) => {
-            return Promise.all(
-                keys.map((key) => {
-                    if (key !== CACHE_NAME) {
-                        return caches.delete(key);
-                    }
-                })
-            );
-        })
-    );
-    self.clients.claim();
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(
+        keys.filter(key =>
+          (key.startsWith('gym-management-') || key === 'shouba-gym-cache-v1') &&
+          key !== CACHE_NAME
+        ).map(key => caches.delete(key))
+      ))
+      .then(() => self.clients.claim())
+  );
 });
 
-// التعامل مع الطلبات (التحميل أوفلاين)
-self.addEventListener('fetch', (event) => {
-    // نتجاوز طلبات الـ API السحابية لكي تذهب للـ localStorage مباشرة عند انقطاع النت
-    if (event.request.url.includes('/api/')) {
-        return;
-    }
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  const url = new URL(request.url);
 
+  // Never cache API responses: queued changes are sent to the live D1 API.
+  if (url.origin === self.location.origin && url.pathname.startsWith('/api/')) {
+    return;
+  }
+
+  if (request.method !== 'GET') return;
+
+  // Always try the newest HTML first; use the app shell only while offline.
+  if (request.mode === 'navigate') {
     event.respondWith(
-        caches.match(event.request).then((cachedResponse) => {
-            return cachedResponse || fetch(event.request).catch(() => {
-                // إذا كان الطلب عبارة عن صفحة HTML ولم يتوفر نت ولا كاش
-                if (event.request.mode === 'navigate') {
-                    return caches.match('/index.html');
-                }
-            });
+      fetch(request)
+        .then(response => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
+          }
+          return response;
         })
+        .catch(() => caches.match('/index.html'))
     );
+    return;
+  }
+
+  // Network-first for static files and CDN libraries, cached fallback offline.
+  event.respondWith(
+    fetch(request)
+      .then(response => {
+        if (response.ok || response.type === 'opaque') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request))
+  );
 });

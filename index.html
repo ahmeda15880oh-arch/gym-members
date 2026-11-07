@@ -21,6 +21,22 @@
             border-radius: 4px;
         }
         button { cursor: pointer; }
+        /* Keep modal controls interactive on touch and mouse devices. */
+        #auth-modal, #member-modal, #attendance-modal, #renew-modal, #delete-modal {
+            pointer-events: auto;
+            touch-action: manipulation;
+        }
+        #auth-modal > div, #member-modal > div, #attendance-modal > div,
+        #renew-modal > div, #delete-modal > div {
+            position: relative;
+            pointer-events: auto;
+        }
+        #auth-password, #member-form input, #member-form select, #member-form button {
+            pointer-events: auto;
+            touch-action: manipulation;
+            user-select: text;
+            -webkit-user-select: text;
+        }
     </style>
 </head>
 
@@ -406,22 +422,13 @@
     // =========================
     // AUTO-SYNC WHEN ONLINE
     // =========================
-    window.addEventListener('online', async () => {
-        try {
-            for (const member of members) {
-                const payload = {
-                    ...member,
-                    months: JSON.stringify(member.months)
-                };
-                
-                await fetch('/api/members', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            }
-        } catch (e) {
-            console.error('فشل المزامنة التلقائية:', e);
+    window.addEventListener('online', () => {
+        syncPendingChanges();
+    });
+
+    window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && navigator.onLine) {
+            syncPendingChanges();
         }
     });
 
@@ -505,113 +512,191 @@
     }
 
     // =========================
-    // LOAD AND SAVE DATA
+    // LOCAL-FIRST STORAGE + RELIABLE SYNC QUEUE
     // =========================
 
-    async function loadMembers() {
+    const MEMBERS_STORAGE_KEY = 'gym_members_db_v4';
+    const SYNC_QUEUE_KEY = 'gym_sync_queue_v1';
+    let syncInProgress = false;
+
+    function readSyncQueue() {
         try {
-            const response = await fetch('/api/members');
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch from cloud');
-            }
-
-            const data = await response.json();
-
-            members = data.map(m => {
-                const months = parseMonthsData(m.months);
-                const attendanceCount = months.filter(x => x === '✓').length;
-
-                const baseEndDate = m.attendanceBaseEndDate ||
-                    addMonthsToDate(m.endDate, -attendanceCount);
-
-                return {
-                    ...m,
-                    months,
-                    attendanceBaseEndDate: baseEndDate
-                };
-            });
-
-            saveToLocalStorage();
-
-        } catch (e) {
-            console.warn('تعذر جلب البيانات السحابية، سيتم استخدام البيانات المحلية', e);
-
-            const localData = localStorage.getItem('gym_members_db_v4');
-
-            members = localData ? JSON.parse(localData) : [];
-
-            members = members.map(m => {
-                const months = parseMonthsData(m.months);
-                const count = months.filter(x => x === '✓').length;
-
-                return {
-                    ...m,
-                    months,
-                    attendanceBaseEndDate: m.attendanceBaseEndDate ||
-                        addMonthsToDate(m.endDate, -count)
-                };
-            });
+            return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '{}');
+        } catch (error) {
+            console.error('تعذر قراءة قائمة المزامنة:', error);
+            return {};
         }
+    }
+
+    function writeSyncQueue(queue) {
+        localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
+    }
+
+    function queueUpsert(memberData) {
+        const queue = readSyncQueue();
+        queue[String(memberData.id)] = {
+            type: 'upsert',
+            id: String(memberData.id),
+            data: { ...memberData, months: parseMonthsData(memberData.months) },
+            updatedAt: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        };
+        writeSyncQueue(queue);
+    }
+
+    function queueDelete(id) {
+        const queue = readSyncQueue();
+        queue[String(id)] = {
+            type: 'delete',
+            id: String(id),
+            updatedAt: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        };
+        writeSyncQueue(queue);
+    }
+
+    function normalizeMember(member) {
+        const months = parseMonthsData(member.months);
+        const count = months.filter(x => x === '✓').length;
+        return {
+            ...member,
+            id: String(member.id),
+            months,
+            attendanceBaseEndDate: member.attendanceBaseEndDate ||
+                addMonthsToDate(member.endDate, -count)
+        };
     }
 
     function saveToLocalStorage() {
         try {
-            localStorage.setItem(
-                'gym_members_db_v4',
-                JSON.stringify(members)
-            );
+            localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(members));
         } catch (e) {
             console.error('Local storage error:', e);
+            alert('تعذر حفظ البيانات على الهاتف. قد تكون مساحة التخزين ممتلئة.');
+        }
+    }
+
+    // Cloud data is the base; pending local edits/deletions always take priority.
+    function mergeCloudWithPending(cloudData) {
+        const queue = readSyncQueue();
+        const merged = new Map();
+
+        (Array.isArray(cloudData) ? cloudData : []).forEach(item => {
+            const normalized = normalizeMember(item);
+            merged.set(normalized.id, normalized);
+        });
+
+        Object.values(queue).forEach(operation => {
+            if (operation.type === 'delete') {
+                merged.delete(String(operation.id));
+            } else if (operation.type === 'upsert' && operation.data) {
+                merged.set(String(operation.id), normalizeMember(operation.data));
+            }
+        });
+
+        members = Array.from(merged.values());
+        saveToLocalStorage();
+    }
+
+    async function loadMembers() {
+        // Display local data immediately; it remains usable offline.
+        try {
+            const localData = JSON.parse(localStorage.getItem(MEMBERS_STORAGE_KEY) || '[]');
+            members = Array.isArray(localData) ? localData.map(normalizeMember) : [];
+        } catch (e) {
+            console.error('بيانات محلية غير صالحة:', e);
+            members = [];
+        }
+
+        try {
+            const response = await fetch('/api/members', { method: 'GET', cache: 'no-store' });
+            if (!response.ok) throw new Error(`Cloud fetch failed: ${response.status}`);
+            const cloudData = await response.json();
+            mergeCloudWithPending(cloudData);
+        } catch (e) {
+            console.warn('لا يوجد اتصال بالخادم؛ سيتم استخدام البيانات المحلية وقائمة المزامنة.', e);
+        }
+
+        // Retry any work left from a previous offline session.
+        if (navigator.onLine) {
+            syncPendingChanges();
+        }
+    }
+
+    async function syncPendingChanges() {
+        if (syncInProgress || !navigator.onLine) return false;
+        syncInProgress = true;
+
+        try {
+            // Process a snapshot. If a newer edit occurs during the request,
+            // its different updatedAt value keeps it in the queue.
+            const snapshot = Object.values(readSyncQueue())
+                .sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt)));
+
+            for (const operation of snapshot) {
+                const currentQueue = readSyncQueue();
+                const current = currentQueue[String(operation.id)];
+                if (!current || current.updatedAt !== operation.updatedAt) continue;
+
+                let response;
+                if (operation.type === 'delete') {
+                    response = await fetch(`/api/members?id=${encodeURIComponent(operation.id)}`, {
+                        method: 'DELETE',
+                        cache: 'no-store'
+                    });
+                    // Treat "not found" as already deleted, if the API returns 404.
+                    if (!response.ok && response.status !== 404) {
+                        throw new Error(`Cloud delete failed: ${response.status}`);
+                    }
+                } else {
+                    const payload = {
+                        ...operation.data,
+                        months: JSON.stringify(parseMonthsData(operation.data.months))
+                    };
+                    response = await fetch('/api/members', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        cache: 'no-store',
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                        const detail = await response.text().catch(() => '');
+                        throw new Error(`Cloud save failed: ${response.status} ${detail}`);
+                    }
+                }
+
+                const latestQueue = readSyncQueue();
+                if (latestQueue[String(operation.id)]?.updatedAt === operation.updatedAt) {
+                    delete latestQueue[String(operation.id)];
+                    writeSyncQueue(latestQueue);
+                }
+            }
+
+            // Refresh server state after successful uploads, preserving any
+            // local operations that may have been queued meanwhile.
+            if (Object.keys(readSyncQueue()).length === 0) {
+                const response = await fetch('/api/members', { cache: 'no-store' });
+                if (response.ok) mergeCloudWithPending(await response.json());
+            }
+            return Object.keys(readSyncQueue()).length === 0;
+
+        } catch (e) {
+            console.warn('تعذرت المزامنة؛ ستبقى التغييرات محفوظة للمحاولة القادمة:', e);
+            return false;
+        } finally {
+            syncInProgress = false;
         }
     }
 
     async function saveMemberToServer(memberData) {
+        // Save locally and enqueue BEFORE attempting the network.
         saveToLocalStorage();
-
-        try {
-            const payload = {
-                ...memberData,
-                months: JSON.stringify(memberData.months)
-            };
-
-            const response = await fetch('/api/members', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                throw new Error('Cloud save failed');
-            }
-
-            return true;
-
-        } catch (e) {
-            console.error('تم الحفظ محلياً فقط لعدم وجود إنترنت', e);
-            return false;
-        }
+        queueUpsert(memberData);
+        return await syncPendingChanges();
     }
 
     async function deleteMemberFromServer(id) {
-        try {
-            const response = await fetch(
-                `/api/members?id=${encodeURIComponent(id)}`,
-                { method: 'DELETE' }
-            );
-
-            if (!response.ok) {
-                throw new Error('Cloud delete failed');
-            }
-
-            return true;
-
-        } catch (e) {
-            console.warn('تم الحذف محلياً فقط لعدم وجود إنترنت', e);
-            return false;
-        }
+        // A tombstone prevents a deleted member from reappearing on next sync.
+        queueDelete(id);
+        return await syncPendingChanges();
     }
 
     // =========================
